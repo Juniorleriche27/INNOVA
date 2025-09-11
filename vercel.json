@@ -1,13 +1,6 @@
 {
   "version": 2,
-  "rootDirectory": "innova-frontend",
   "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next"
+    { "src": "package.json", "use": "@vercel/next" }
+  ]
 }
