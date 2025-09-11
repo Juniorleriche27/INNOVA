@@ -1,78 +1,95 @@
-"use client";
-import { useEffect, useState } from "react";
+// src/app/projects/page.tsx
+import Link from "next/link";
 
-interface Project {
+type Project = {
   id: string;
   name: string;
   slug: string;
-  description?: string;
-  status?: string;
-  repo_url?: string;
-  live_url?: string;
+  title?: string | null;
+  description?: string | null;
+  repo_url?: string | null;
+  live_url?: string | null;
+  logo_url?: string | null;
+  status?: "draft" | "published" | "archived" | string | null;
+  created_at?: string | null;
+};
+
+async function getProjects(): Promise<Project[]> {
+  const base = process.env.NEXT_PUBLIC_API_URL;
+  if (!base) throw new Error("NEXT_PUBLIC_API_URL manquant.");
+  const res = await fetch(`${base}/projects`, {
+    // évite cache build
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Échec API /projects (${res.status}): ${text}`);
+  }
+  return (await res.json()) as Project[];
 }
 
-export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchProjects() {
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects/`);
-        if (!res.ok) throw new Error("Erreur API " + res.status);
-        const data = await res.json();
-        setProjects(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchProjects();
-  }, []);
-
-  if (loading) return <p>Chargement...</p>;
-  if (error) return <p className="text-red-600">Erreur: {error}</p>;
+export default async function ProjectsPage() {
+  const projects = await getProjects();
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-xl font-semibold">Liste des projets</h1>
+    <main className="mx-auto max-w-4xl p-6">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Projets</h1>
+        <Link
+          href="/projects/new"
+          className="rounded-lg bg-black px-4 py-2 text-white hover:opacity-90"
+        >
+          Nouveau projet
+        </Link>
+      </div>
+
       {projects.length === 0 ? (
-        <p>Aucun projet trouvé.</p>
+        <p className="text-sm text-gray-600">Aucun projet pour le moment.</p>
       ) : (
-        <ul className="grid gap-4 md:grid-cols-2">
+        <ul className="space-y-3">
           {projects.map((p) => (
             <li
               key={p.id}
-              className="border rounded-lg p-4 shadow hover:shadow-md transition"
+              className="rounded-xl border p-4 hover:bg-gray-50 transition"
             >
-              <h2 className="text-lg font-bold">{p.name}</h2>
-              <p className="text-gray-600 text-sm">{p.description}</p>
-              <div className="mt-2 flex gap-4 text-sm">
-                {p.repo_url && (
-                  <a
-                    href={p.repo_url}
-                    target="_blank"
-                    className="text-blue-600 hover:underline"
-                  >
-                    Code source
-                  </a>
-                )}
-                {p.live_url && (
-                  <a
-                    href={p.live_url}
-                    target="_blank"
-                    className="text-green-600 hover:underline"
-                  >
-                    Démo en ligne
-                  </a>
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-medium">
+                    {p.title ?? p.name}
+                    <span className="ml-2 text-gray-500">({p.slug})</span>
+                  </h2>
+                  {p.description ? (
+                    <p className="text-sm text-gray-600">{p.description}</p>
+                  ) : null}
+                </div>
+                <div className="flex gap-3">
+                  {p.live_url ? (
+                    <a
+                      className="text-sm underline"
+                      href={p.live_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Live
+                    </a>
+                  ) : null}
+                  {p.repo_url ? (
+                    <a
+                      className="text-sm underline"
+                      href={p.repo_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Repo
+                    </a>
+                  ) : null}
+                </div>
               </div>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </main>
   );
 }
