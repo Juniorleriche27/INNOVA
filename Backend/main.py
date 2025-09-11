@@ -18,11 +18,15 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://TON-PROJET.vercel.app",   # ton domaine Vercel
+        # "https://ton-domaine-personnel.com"  # si tu ajoutes un domaine custom
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 def root():
