@@ -19,7 +19,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://innova-qr1i.vercel.app/account/recover",   # ton domaine Vercel
+        "https://innova-qr1i.vercel.app",   # ton domaine Vercel
         # "https://ton-domaine-personnel.com"  # si tu ajoutes un domaine custom
     ],
     allow_credentials=True,
