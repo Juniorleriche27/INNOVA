@@ -1,44 +1,74 @@
 "use client";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import clsx from "clsx";
+
+
+type NavItemProps = {
+  href: string;
+  children: React.ReactNode;
+  className?: string;
+  exact?: boolean; // si true, active seulement quand le path == href
+};
+
+function NavItem({ href, children, className, exact = false }: NavItemProps) {
+  const pathname = usePathname();
+  const isActive = exact ? pathname === href : pathname.startsWith(href);
+
+  return (
+    <Link
+      href={href}
+      className={clsx(
+        "block rounded px-3 py-2 no-underline outline-none transition",
+        isActive
+          ? "bg-gray-800 text-white"
+          : "text-gray-300 hover:bg-gray-800 hover:text-white focus:bg-gray-800 focus:text-white",
+        className
+      )}
+      aria-current={isActive ? "page" : undefined}
+    >
+      {children}
+    </Link>
+  );
+}
 
 export default function Sidebar() {
+  const pathname = usePathname();
+  const inProjects = pathname.startsWith("/projects");
+
   return (
     <aside className="h-full w-64 bg-gray-900 text-white flex flex-col">
+      {/* Header */}
       <div className="px-6 py-4 text-xl font-bold tracking-wide">INNOVA+</div>
 
+      {/* Nav */}
       <nav className="flex-1 px-3 space-y-1 text-sm">
-        <Link
-          href="/projects"
-          className="block px-3 py-2 rounded hover:bg-gray-800 no-underline"
-        >
-          Projets
-        </Link>
-        <Link
+        {/* Projets */}
+        <NavItem href="/projects">Projets</NavItem>
+
+        {/* + Nouveau : apparaît “en contexte” des projets, et style plus discret */}
+        <NavItem
           href="/projects/new"
-          className="block px-6 py-2 rounded hover:bg-gray-800 no-underline text-gray-300"
+          exact
+          className={clsx(
+            "ml-3 text-xs",
+            inProjects ? "opacity-100" : "opacity-70"
+          )}
         >
           + Nouveau
-        </Link>
-        <Link
-          href="/domains"
-          className="block px-3 py-2 rounded hover:bg-gray-800 no-underline"
-        >
-          Domaines
-        </Link>
-        <Link
-          href="/contributors"
-          className="block px-3 py-2 rounded hover:bg-gray-800 no-underline"
-        >
-          Contributeurs
-        </Link>
-        <Link
-          href="/technologies"
-          className="block px-3 py-2 rounded hover:bg-gray-800 no-underline"
-        >
-          Technologies
-        </Link>
+        </NavItem>
+
+        {/* Domaines */}
+        <NavItem href="/domains">Domaines</NavItem>
+
+        {/* Contributeurs */}
+        <NavItem href="/contributors">Contributeurs</NavItem>
+
+        {/* Technologies */}
+        <NavItem href="/technologies">Technologies</NavItem>
       </nav>
 
+      {/* Footer */}
       <div className="px-6 py-4 text-[11px] text-gray-400 border-t border-white/10">
         v1.0.0
       </div>
