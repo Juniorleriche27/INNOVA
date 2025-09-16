@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from deps.auth import get_bearer_token
 from lib.supa import supa_for_jwt
@@ -7,60 +7,75 @@ from schemas.contributor import Contributor, ContributorCreate, ContributorUpdat
 
 router = APIRouter(tags=["contributors"])
 
-# ✅ Liste globale (optionnellement filtrée par project_id via query ?project_id=...)
+COLUMNS = "id, project_id, user_id, name, role, email, github"
+
+def _row_to_contributor(row: Dict[str, Any]) -> Contributor:
+    """
+    Aligne précisément la ligne Supabase sur le schéma Pydantic.
+    Cast explicite des UUID si Supabase renvoie des str.
+    """
+    try:
+        return Contributor.model_validate({
+            "id": UUID(str(row.get("id"))) if row.get("id") is not None else None,
+            "project_id": UUID(str(row.get("project_id"))) if row.get("project_id") is not None else None,
+            "user_id": UUID(str(row.get("user_id"))) if row.get("user_id") is not None else None,
+            "name": row.get("name"),
+            "role": row.get("role"),
+            "email": row.get("email"),
+            "github": row.get("github"),
+        })
+    except Exception as e:
+        # Erreur de validation = incohérence schéma/données => 500 explicite
+        raise HTTPException(status_code=500, detail=f"Contributor: invalid payload from DB ({e})")
+
 @router.get("/", response_model=List[Contributor], response_model_exclude_none=True)
-def list_all_contributors(
+def list_contributors(
     project_id: Optional[UUID] = None,
     token: str | None = Depends(get_bearer_token),
 ):
-    try:
-        sb = supa_for_jwt(token)
-        query = sb.table("contributors").select("*")
-        if project_id:
-            query = query.eq("project_id", str(project_id))
-        res = query.execute()
-        return res.data or []
-    except Exception as e:
-        # Évite de faire planter le frontend si l’API tombe
-        raise HTTPException(status_code=500, detail=f"Erreur lors de la lecture des contributeurs: {e}")
+    sb = supa_for_jwt(token)
+    q = sb.table("contributors").select(COLUMNS)
+    if project_id:
+        q = q.eq("project_id", str(project_id))
+    res = q.execute()
+    rows = res.data or []
+    return [_row_to_contributor(r) for r in rows]
 
-# Liste des contributeurs d’un projet (via path param)
 @router.get("/project/{project_id}", response_model=List[Contributor], response_model_exclude_none=True)
-def list_contributors_by_project(project_id: UUID, token: str | None = Depends(get_bearer_token)):
-    try:
-        sb = supa_for_jwt(token)
-        res = sb.table("contributors").select("*").eq("project_id", str(project_id)).execute()
-        return res.data or []
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur lors de la lecture des contributeurs du projet: {e}")
+def list_contributors_by_project(
+    project_id: UUID,
+    token: str | None = Depends(get_bearer_token),
+):
+    sb = supa_for_jwt(token)
+    res = sb.table("contributors").select(COLUMNS).eq("project_id", str(project_id)).execute()
+    rows = res.data or []
+    return [_row_to_contributor(r) for r in rows]
 
-# Créer un contributor (liaison user_id <-> project_id)
 @router.post("/", status_code=201, response_model=Contributor, response_model_exclude_none=True)
 def create_contributor(payload: ContributorCreate, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
-    data = payload.dict(exclude_none=True)
+    data = payload.model_dump(exclude_none=True)
+    # Supabase attend des str pour UUID si champs TEXT/UUID
     data["project_id"] = str(data["project_id"])
     data["user_id"] = str(data["user_id"])
-    res = sb.table("contributors").insert(data).execute()
+    res = sb.table("contributors").insert(data).select(COLUMNS).single().execute()
     if not res.data:
         raise HTTPException(status_code=500, detail="Erreur lors de la création du contributor.")
-    return res.data[0]
+    return _row_to_contributor(res.data)
 
-# Mettre à jour un contributor
 @router.put("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
 def update_contributor(contributor_id: UUID, payload: ContributorUpdate, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
-    data = payload.dict(exclude_unset=True, exclude_none=True)
-    res = sb.table("contributors").update(data).eq("id", str(contributor_id)).execute()
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
+    res = sb.table("contributors").update(data).eq("id", str(contributor_id)).select(COLUMNS).single().execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Contributor introuvable.")
-    return res.data[0]
+    return _row_to_contributor(res.data)
 
-# Supprimer un contributor
 @router.delete("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
 def delete_contributor(contributor_id: UUID, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
-    res = sb.table("contributors").delete().eq("id", str(contributor_id)).execute()
+    res = sb.table("contributors").delete().eq("id", str(contributor_id)).select(COLUMNS).single().execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Contributor introuvable.")
-    return res.data[0]
+    return _row_to_contributor(res.data)
