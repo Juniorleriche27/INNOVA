@@ -1,40 +1,44 @@
 import os
-from dotenv import load_dotenv
+from typing import Optional, Dict
 from postgrest import SyncPostgrestClient
 
-load_dotenv()
+# ---- Config ----
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_REST_URL = os.getenv("SUPABASE_REST_URL") or (SUPABASE_URL + "/rest/v1")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
-REST_URL = f"{SUPABASE_URL}/rest/v1"
+DEFAULT_HEADERS: Dict[str, str] = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "apikey": SUPABASE_ANON_KEY or "",
+}
 
-def _headers_for_token(token: str | None):
-    bearer = token if token else SUPABASE_ANON_KEY
-    return {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": f"Bearer {bearer}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+def _client_with_headers(headers: Dict[str, str]) -> SyncPostgrestClient:
+    # IMPORTANT: ne pas passer 'http_client' (incompatible avec postgrest>=0.19)
+    return SyncPostgrestClient(
+        SUPABASE_REST_URL,
+        schema="public",
+        headers=headers,
+        timeout=120,
+        verify=True,
+        proxy=None,
+    )
 
-class _PgWrapper:
-    def __init__(self, token: str | None):
-        self._client = SyncPostgrestClient(
-            REST_URL,
-            headers=_headers_for_token(token),
-            schema="public",
-            timeout=120,
-            verify=True,
-            proxy=None,
-        )
+# Client public (anon)
+sb_anon = _client_with_headers({
+    **DEFAULT_HEADERS,
+    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+})
 
-    def table(self, name: str):
-        return self._client.from_(name)
-
-    def from_(self, name: str):
-        return self._client.from_(name)
-
-sb_anon = _PgWrapper(token=None)
-
-def supa_for_jwt(jwt: str | None):
-    return _PgWrapper(token=jwt)
+def supa_for_jwt(jwt: Optional[str]) -> SyncPostgrestClient:
+    """
+    Retourne un client PostgREST avec:
+      - JWT utilisateur si fourni (Authorization: Bearer <jwt>)
+      - Sinon client anonyme (RLS public)
+    """
+    if jwt:
+        return _client_with_headers({
+            **DEFAULT_HEADERS,
+            "Authorization": f"Bearer {jwt}",
+        })
+    return sb_anon

@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict  # 👈 v2
+from pydantic import BaseModel, ConfigDict
 
 class DomainBase(BaseModel):
     name: str
@@ -13,7 +13,7 @@ class DomainCreate(DomainBase):
 
 class Domain(DomainBase):
     id: UUID
-    model_config = ConfigDict(from_attributes=True)  # 👈 v2
+    model_config = ConfigDict(from_attributes=True)
 
 class DomainUpdate(BaseModel):
     name: Optional[str] = None

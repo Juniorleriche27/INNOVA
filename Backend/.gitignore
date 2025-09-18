@@ -1,0 +1,31 @@
+# Node / Next
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-*.log*
+pnpm-debug.log*
+.vscode/
+
+# Env (ne jamais committer)
+.env
+.env.*
+!.env.example
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+Backend_backup/
+
+innova-frontend_backup/

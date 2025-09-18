@@ -4,7 +4,6 @@ from uuid import UUID
 from deps.auth import get_bearer_token
 from lib.supa import supa_for_jwt
 from schemas.contributor import Contributor, ContributorCreate, ContributorUpdate
-from postgrest import APIError  # << pour capter les erreurs PostgREST
 
 router = APIRouter(tags=["contributors"])
 
@@ -24,72 +23,63 @@ def _row_to_contributor(row: Dict[str, Any]) -> Contributor:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Contributor: invalid payload from DB ({e})")
 
-def _exec(q, not_found_msg: Optional[str] = None):
-    """Exécute une requête PostgREST en capturant APIError et not_found."""
-    try:
-        res = q.execute()
-    except APIError as e:
-        # e.message / e.code disponibles selon la version
-        msg = getattr(e, "message", str(e))
-        code = getattr(e, "code", 400) or 400
-        raise HTTPException(status_code=code, detail=msg)
+def _raise_if_error(res, not_found_msg: Optional[str] = None):
+    err = getattr(res, "error", None)
+    if err:
+        msg = getattr(err, "message", str(err))
+        code = getattr(err, "status_code", 400)
+        raise HTTPException(status_code=code or 400, detail=msg)
     if not res.data and not_found_msg:
         raise HTTPException(status_code=404, detail=not_found_msg)
-    return res
 
 @router.get("/", response_model=List[Contributor], response_model_exclude_none=True)
-def list_contributors(
-    project_id: Optional[UUID] = None,
-    token: str | None = Depends(get_bearer_token),
-):
+def list_contributors(project_id: Optional[UUID] = None, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
-    q = sb.table("contributors").select(COLUMNS)
+    q = sb.from_("contributors").select(COLUMNS)
     if project_id:
         q = q.eq("project_id", str(project_id))
-    rows = _exec(q).data or []
+    res = q.execute()
+    _raise_if_error(res)
+    rows = res.data or []
     return [_row_to_contributor(r) for r in rows]
 
 @router.get("/project/{project_id}", response_model=List[Contributor], response_model_exclude_none=True)
-def list_contributors_by_project(
-    project_id: UUID,
-    token: str | None = Depends(get_bearer_token),
-):
+def list_contributors_by_project(project_id: UUID, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
-    rows = _exec(
-        sb.table("contributors").select(COLUMNS).eq("project_id", str(project_id))
-    ).data or []
+    res = sb.from_("contributors").select(COLUMNS).eq("project_id", str(project_id)).execute()
+    _raise_if_error(res)
+    rows = res.data or []
     return [_row_to_contributor(r) for r in rows]
 
 @router.post("/", status_code=201, response_model=Contributor, response_model_exclude_none=True)
 def create_contributor(payload: ContributorCreate, token: str | None = Depends(get_bearer_token)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
     sb = supa_for_jwt(token)
     data = payload.model_dump(exclude_none=True)
-    if data.get("project_id") is not None:
+    if "project_id" in data and data["project_id"] is not None:
         data["project_id"] = str(data["project_id"])
-    if data.get("user_id") is not None:
+    if "user_id" in data and data["user_id"] is not None:
         data["user_id"] = str(data["user_id"])
-
-    row = _exec(
-        sb.table("contributors").insert(data).select(COLUMNS).single(),
-        "Erreur lors de la création du contributor."
-    ).data
-    return _row_to_contributor(row)
+    res = sb.from_("contributors").insert(data).select(COLUMNS).single().execute()
+    _raise_if_error(res, "Erreur lors de la création du contributor.")
+    return _row_to_contributor(res.data)
 
 @router.put("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
 def update_contributor(contributor_id: UUID, payload: ContributorUpdate, token: str | None = Depends(get_bearer_token)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
     sb = supa_for_jwt(token)
     data = payload.model_dump(exclude_unset=True, exclude_none=True)
-    row = _exec(
-        sb.table("contributors").update(data).eq("id", str(contributor_id)).select(COLUMNS).single(),
-        "Contributor introuvable."
-    ).data
-    return _row_to_contributor(row)
+    res = sb.from_("contributors").update(data).eq("id", str(contributor_id)).select(COLUMNS).single().execute()
+    _raise_if_error(res, "Contributor introuvable.")
+    return _row_to_contributor(res.data)
 
 @router.delete("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
 def delete_contributor(contributor_id: UUID, token: str | None = Depends(get_bearer_token)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
     sb = supa_for_jwt(token)
-    row = _exec(
-        sb.table("contributors").delete().eq("id", str(contributor_id)).select(COLUMNS).single(),
-        "Contributor introuvable."
-    ).data
-    return _row_to_contributor(row)
+    res = sb.from_("contributors").delete().eq("id", str(contributor_id)).select(COLUMNS).single().execute()
+    _raise_if_error(res, "Contributor introuvable.")
+    return _row_to_contributor(res.data)
