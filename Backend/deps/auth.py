@@ -1,14 +1,24 @@
+# deps/auth.py
 from fastapi import Header
+from typing import Optional
 
-def get_bearer_token(authorization: str | None = Header(default=None, convert_underscores=False)):
+def get_bearer_token(
+    authorization: Optional[str] = Header(default=None, convert_underscores=False)
+) -> Optional[str]:
     """
-    Récupère le token Bearer depuis le header Authorization
+    Extrait le token Bearer depuis l'en-tête HTTP Authorization.
     Exemple attendu :
-    Authorization: Bearer <token>
+        Authorization: Bearer <token>
+    Retourne:
+        - le token (str) si trouvé,
+        - None si absent ou mal formé.
     """
     if not authorization:
         return None
-    parts = authorization.split()
+
+    parts = authorization.strip().split()
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return parts[1]
+
+    # Optionnel: tu pourrais logger ici si besoin
     return None

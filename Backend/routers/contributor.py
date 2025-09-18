@@ -7,26 +7,38 @@ from schemas.contributor import Contributor, ContributorCreate, ContributorUpdat
 
 router = APIRouter(tags=["contributors"])
 
+# NB: ne pas inclure created_at si ton schéma Pydantic ne l'attend pas
 COLUMNS = "id, project_id, user_id, name, role, email, github"
 
 def _row_to_contributor(row: Dict[str, Any]) -> Contributor:
     """
-    Aligne précisément la ligne Supabase sur le schéma Pydantic.
-    Cast explicite des UUID si Supabase renvoie des str.
+    Map précis d'une ligne Supabase -> schéma Pydantic.
+    UUID castés seulement si non-nuls (évite les ValidationError).
     """
     try:
         return Contributor.model_validate({
-            "id": UUID(str(row.get("id"))) if row.get("id") is not None else None,
-            "project_id": UUID(str(row.get("project_id"))) if row.get("project_id") is not None else None,
-            "user_id": UUID(str(row.get("user_id"))) if row.get("user_id") is not None else None,
+            "id": UUID(str(row["id"])) if row.get("id") is not None else None,
+            "project_id": UUID(str(row["project_id"])) if row.get("project_id") is not None else None,
+            "user_id": UUID(str(row["user_id"])) if row.get("user_id") is not None else None,
             "name": row.get("name"),
             "role": row.get("role"),
             "email": row.get("email"),
             "github": row.get("github"),
         })
     except Exception as e:
-        # Erreur de validation = incohérence schéma/données => 500 explicite
+        # Incohérence schéma/données -> 500 explicite avec détail utile
         raise HTTPException(status_code=500, detail=f"Contributor: invalid payload from DB ({e})")
+
+def _raise_if_error(res, not_found_msg: Optional[str] = None):
+    # supabase-py v2: res possède .data et .error ; .status si dispo
+    err = getattr(res, "error", None)
+    if err:
+        # PostgREST renvoie souvent 401/403 sur RLS; sinon 400/409 etc.
+        msg = getattr(err, "message", str(err))
+        code = getattr(err, "status_code", 400)
+        raise HTTPException(status_code=code or 400, detail=msg)
+    if not res.data and not_found_msg:
+        raise HTTPException(status_code=404, detail=not_found_msg)
 
 @router.get("/", response_model=List[Contributor], response_model_exclude_none=True)
 def list_contributors(
@@ -38,6 +50,7 @@ def list_contributors(
     if project_id:
         q = q.eq("project_id", str(project_id))
     res = q.execute()
+    _raise_if_error(res)
     rows = res.data or []
     return [_row_to_contributor(r) for r in rows]
 
@@ -48,6 +61,7 @@ def list_contributors_by_project(
 ):
     sb = supa_for_jwt(token)
     res = sb.table("contributors").select(COLUMNS).eq("project_id", str(project_id)).execute()
+    _raise_if_error(res)
     rows = res.data or []
     return [_row_to_contributor(r) for r in rows]
 
@@ -55,12 +69,15 @@ def list_contributors_by_project(
 def create_contributor(payload: ContributorCreate, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
     data = payload.model_dump(exclude_none=True)
-    # Supabase attend des str pour UUID si champs TEXT/UUID
-    data["project_id"] = str(data["project_id"])
-    data["user_id"] = str(data["user_id"])
+
+    # Cast UUID -> str uniquement si présents
+    if "project_id" in data and data["project_id"] is not None:
+        data["project_id"] = str(data["project_id"])
+    if "user_id" in data and data["user_id"] is not None:
+        data["user_id"] = str(data["user_id"])
+
     res = sb.table("contributors").insert(data).select(COLUMNS).single().execute()
-    if not res.data:
-        raise HTTPException(status_code=500, detail="Erreur lors de la création du contributor.")
+    _raise_if_error(res, "Erreur lors de la création du contributor.")
     return _row_to_contributor(res.data)
 
 @router.put("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
@@ -68,14 +85,12 @@ def update_contributor(contributor_id: UUID, payload: ContributorUpdate, token: 
     sb = supa_for_jwt(token)
     data = payload.model_dump(exclude_unset=True, exclude_none=True)
     res = sb.table("contributors").update(data).eq("id", str(contributor_id)).select(COLUMNS).single().execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Contributor introuvable.")
+    _raise_if_error(res, "Contributor introuvable.")
     return _row_to_contributor(res.data)
 
 @router.delete("/{contributor_id}", response_model=Contributor, response_model_exclude_none=True)
 def delete_contributor(contributor_id: UUID, token: str | None = Depends(get_bearer_token)):
     sb = supa_for_jwt(token)
     res = sb.table("contributors").delete().eq("id", str(contributor_id)).select(COLUMNS).single().execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Contributor introuvable.")
+    _raise_if_error(res, "Contributor introuvable.")
     return _row_to_contributor(res.data)
