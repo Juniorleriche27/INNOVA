@@ -1,4 +1,3 @@
-# schemas/contributor.py (extrait, à mettre à jour si nécessaire)
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from uuid import UUID
@@ -6,7 +5,7 @@ from uuid import UUID
 class Contributor(BaseModel):
     id: UUID
     project_id: UUID
-    user_id: Optional[UUID] = None   # <- optionnel
+    user_id: Optional[UUID] = None
     name: Optional[str] = None
     role: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -14,7 +13,7 @@ class Contributor(BaseModel):
 
 class ContributorCreate(BaseModel):
     project_id: UUID
-    user_id: Optional[UUID] = None   # <- optionnel aussi ici
+    user_id: Optional[UUID] = None
     name: Optional[str] = None
     role: Optional[str] = None
     email: Optional[EmailStr] = None
