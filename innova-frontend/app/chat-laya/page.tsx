@@ -1,110 +1,90 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useState } from "react";
 
-/** Message échangé avec le backend */
-type Msg = { role: "user" | "assistant"; content: string };
+const API =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
 
-/** URL de l’API (Render) lue depuis l’env publique Next */
-const API_URL: string | undefined = process.env.NEXT_PUBLIC_API_URL;
+type Hit = {
+  id: string;
+  score: number;
+  payload: { text?: string; source?: string; [k: string]: unknown } | null;
+};
 
 export default function ChatLayaPage() {
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: "Bienvenue sur Chat-LAYA 👋" },
-  ]);
-  const [text, setText] = useState("");
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<Hit[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  // Petit check pour aider au debug (n'affecte pas le build)
-  useEffect(() => {
-    if (!API_URL) {
-      console.warn(
-        "NEXT_PUBLIC_API_URL est manquante. Configure-la dans Vercel → Project → Environment Variables."
-      );
-    }
-  }, []);
-
-  async function sendMessage() {
-    if (!text.trim()) return;
-    setError(null);
-
-    const next: Msg[] = [...messages, { role: "user", content: text }];
-    setMessages(next);
-    setText("");
+  async function onSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!q.trim()) return;
     setLoading(true);
-
+    setErr(null);
+    setHits([]);
     try {
-      if (!API_URL) throw new Error("NEXT_PUBLIC_API_URL non définie");
-
-      const res = await fetch(`${API_URL}/chatlaya/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next }),
-      });
-
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`HTTP ${res.status} – ${body}`);
-      }
-
-      const data: unknown = await res.json();
-      const answer =
-        (data as { answer?: string })?.answer ??
-        (data as { message?: string })?.message ??
-        "Réponse reçue.";
-
-      setMessages([...next, { role: "assistant", content: String(answer) }]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur inconnue");
+      const res = await fetch(
+        `${API}/chatlaya/search?query=${encodeURIComponent(q)}&limit=5`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setHits((data?.hits || []) as Hit[]);
+    } catch (e: any) {
+      setErr(e?.message || "Erreur inconnue");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold">💬 Chat-LAYA</h1>
+    <main className="max-w-3xl mx-auto px-4 py-10">
+      <h1 className="text-3xl font-bold mb-2">Chat-LAYA (RAG)</h1>
+      <p className="text-gray-600 mb-6">
+        Recherche sémantique sur les documents ingérés.
+      </p>
 
-      {error && (
-        <div className="text-sm text-red-600" role="alert">
-          {error}
+      <form onSubmit={onSearch} className="flex gap-2 mb-6">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Pose ta question…"
+          className="flex-1 border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          type="submit"
+          className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
+          disabled={loading}
+        >
+          {loading ? "Recherche…" : "Rechercher"}
+        </button>
+      </form>
+
+      {err && (
+        <div className="mb-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {err}
         </div>
       )}
 
       <div className="space-y-3">
-        {messages.map((m, i) => (
+        {hits.map((h) => (
           <div
-            key={i}
-            className={`rounded-lg p-3 ${
-              m.role === "user"
-                ? "bg-gray-100 text-gray-800"
-                : "bg-blue-50 text-blue-900"
-            }`}
+            key={h.id}
+            className="rounded border px-4 py-3 bg-white shadow-sm"
           >
-            <span className="font-medium mr-2">
-              {m.role === "user" ? "Vous" : "LAYA"}:
-            </span>
-            {m.content}
+            <div className="text-sm text-gray-500">score: {h.score.toFixed(4)}</div>
+            <div className="font-medium">{h.payload?.text || "—"}</div>
+            {h.payload?.source && (
+              <div className="text-xs text-gray-500 mt-1">
+                source: {String(h.payload.source)}
+              </div>
+            )}
           </div>
         ))}
-      </div>
-
-      <div className="flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Votre message…"
-          className="flex-1 border rounded-lg px-3 py-2"
-          disabled={loading}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading}
-          className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
-        >
-          {loading ? "Envoi…" : "Envoyer"}
-        </button>
+        {!loading && !err && hits.length === 0 && (
+          <div className="text-gray-600">Aucun résultat pour l’instant.</div>
+        )}
       </div>
     </main>
   );
