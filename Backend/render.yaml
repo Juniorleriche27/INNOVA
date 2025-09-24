@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: innova-backend
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    headers:
+      - path: /*
+        name: Access-Control-Allow-Origin
+        value: ${CORS_ALLOW_ORIGIN}
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: CORS_ALLOW_ORIGIN
+        value: https://<ton-site-vercel>.vercel.app
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
