@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Route } from "next";
+import type { ReactNode } from "react";
 import clsx from "clsx";
 
-
 type NavItemProps = {
-  href: string;
-  children: React.ReactNode;
+  href: Route;
+  children: ReactNode;
   className?: string;
   exact?: boolean; // si true, active seulement quand le path == href
 };
@@ -43,28 +44,18 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 space-y-1 text-sm">
-        {/* Projets */}
         <NavItem href="/projects">Projets</NavItem>
 
-        {/* + Nouveau : apparaît “en contexte” des projets, et style plus discret */}
         <NavItem
           href="/projects/new"
           exact
-          className={clsx(
-            "ml-3 text-xs",
-            inProjects ? "opacity-100" : "opacity-70"
-          )}
+          className={clsx("ml-3 text-xs", inProjects ? "opacity-100" : "opacity-70")}
         >
           + Nouveau
         </NavItem>
 
-        {/* Domaines */}
         <NavItem href="/domains">Domaines</NavItem>
-
-        {/* Contributeurs */}
         <NavItem href="/contributors">Contributeurs</NavItem>
-
-        {/* Technologies */}
         <NavItem href="/technologies">Technologies</NavItem>
       </nav>
 
