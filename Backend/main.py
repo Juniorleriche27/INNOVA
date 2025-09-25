@@ -21,21 +21,32 @@ app = FastAPI(
 )
 
 # -------- CORS ----------
-# On garde tes origines actuelles ET on permet d’ajouter par variable d’env
+# Origines par défaut (prod Vercel + previews + local)
 default_origins = {
-    "https://innova-qr1i.vercel.app",
+    "https://innova-qr1i.vercel.app",  # domaine prod
+    "https://*.vercel.app",            # previews Vercel (wildcard)
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 }
 
+# On autorise des origines supplémentaires via variables d'env :
+# - CORS_ALLOW_ORIGIN : une seule origine
+# - CORS_ORIGINS      : liste séparée par virgules
 env_origin = os.getenv("CORS_ALLOW_ORIGIN", "").strip()
 if env_origin:
     default_origins.add(env_origin)
 
+env_origins_csv = os.getenv("CORS_ORIGINS", "").strip()
+if env_origins_csv:
+    for item in env_origins_csv.split(","):
+        item = item.strip()
+        if item:
+            default_origins.add(item)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(default_origins),
-    allow_credentials=True,
+    allow_credentials=False,   # pas de cookies inter-origines
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -44,6 +55,10 @@ app.add_middleware(
 @app.get("/")
 def root():
     return {"message": "Bienvenue sur INNOVA+"}
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 @app.get("/healthz")
 def healthz():
@@ -56,20 +71,20 @@ app.include_router(contributor.router, prefix="/contributors", tags=["contributo
 app.include_router(technology.router, prefix="/technologies", tags=["technologies"])
 
 # -------- Chat-LAYA --------
-# Endpoints attendus:
-#   POST /chatlaya/chat
+# Endpoints exposés par le router :
+#   POST /chatlaya/ask
+#   GET  /chatlaya/search
 #   POST /chatlaya/ingest
-#   POST /chatlaya/feedback
 app.include_router(chatlaya.router, prefix="/chatlaya", tags=["chat-laya"])
 
-
 # -------- Test Qdrant --------
+# (Conserve ceci seulement si ton services/rag_service.py expose bien 'client')
 from services.rag_service import client
 
 @app.get("/qdrant-test")
 def qdrant_test():
     """
-    Test de connexion à Qdrant Cloud.
+    Test simple de connexion à Qdrant.
     """
     try:
         info = client.get_collections()
