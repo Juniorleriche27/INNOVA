@@ -1,130 +1,94 @@
-"""
-RAG service pour Chat-LAYA (Qdrant Cloud)
-- Connexion client
-- Création collection si absente
-- Ingestion (fichier -> chunks -> embeddings -> upsert)
-- Recherche contextuelle (query_points)
-- Helpers: upsert_texts, delete_by_doc_id
-
-Compat Windows: pas de multiprocessing implicite.
-"""
-
+# services/rag.py
+import hashlib
+import json
 import os
-from typing import Tuple, List, Iterable, Optional
-from qdrant_client import QdrantClient, models
-from qdrant_client.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
-from sentence_transformers import SentenceTransformer
+import re
+from typing import List, Tuple, Optional
 
-# -------------------- Config --------------------
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION = "chatlaya_docs"
+import psycopg2
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # 384 dims
-VECTOR_SIZE = 384
+EMB_DIM = int(os.getenv("EMBED_DIM", os.getenv("EMB_DIM", "384")))  # compat .env
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "innova_docs")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Client Qdrant (HTTP; prefer_grpc=False = compat réseaux stricts/Windows)
-client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-    prefer_grpc=False,
-    timeout=30.0,
-)
+def normalize_q(q: str) -> str:
+    s = (q or "").strip().lower()
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-# Modèle d'embedding
-model = SentenceTransformer(EMBEDDING_MODEL)
+def q_hash(q: str) -> str:
+    return hashlib.sha256(normalize_q(q).encode("utf-8")).hexdigest()
 
-# Crée la collection si elle n’existe pas
-if not client.collection_exists(COLLECTION):
-    client.create_collection(
-        collection_name=COLLECTION,
-        vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-    )
+def pg_conn():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL manquant")
+    return psycopg2.connect(DATABASE_URL)
 
-# -------------------- Utils --------------------
-def _chunk_text(text: str, size: int = 800) -> List[str]:
-    return [text[i:i+size] for i in range(0, len(text), size)] if text else []
+def cache_get(question: str) -> Optional[Tuple[str, list]]:
+    with pg_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select answer, coalesce(sources,'[]'::jsonb) from answers_cache where q_hash=%s",
+            (q_hash(question),),
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0], row[1]
+    return None
 
-
-def upsert_texts(texts: Iterable[str], doc_id: Optional[str] = None) -> int:
-    """
-    Upsert d'une liste de passages (déjà découpés) avec embeddings.
-    doc_id: identifiant logique de la source (permettra delete ciblé)
-    Retourne le nombre de points insérés.
-    """
-    texts = [t for t in texts if t and t.strip()]
-    if not texts:
-        return 0
-
-    vectors = model.encode(texts, normalize_embeddings=True).tolist()
-    payloads = [{"text": t, **({"doc_id": doc_id} if doc_id else {})} for t in texts]
-
-    points = []
-    for v, p in zip(vectors, payloads):
-        points.append(models.PointStruct(id=models.Uuid(uuid=None), vector=v, payload=p))  # id auto
-
-    client.upsert(collection_name=COLLECTION, points=points)
-    return len(points)
-
-
-def delete_by_doc_id(doc_id: str) -> int:
-    """
-    Supprime tous les points dont payload.doc_id == doc_id.
-    Retourne un indicatif (Qdrant ne renvoie pas le count exact).
-    """
-    if not doc_id:
-        return 0
-
-    cond = FieldCondition(key="doc_id", match=MatchValue(value=doc_id))
-    client.delete(
-        collection_name=COLLECTION,
-        points_selector=models.FilterSelector(filter=Filter(must=[cond])),
-    )
-    return 1
-
-
-# -------------------- API utilisée par les routers --------------------
-def ingest_file(file) -> tuple[bool, str]:
-    """
-    Lit un fichier uploadé, découpe, embed, upsert dans Qdrant.
-    """
-    try:
-        raw = file.file.read()
-        text = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
-        chunks = _chunk_text(text, 800)
-        if not chunks:
-            return False, "⚠️ Fichier vide ou non lisible"
-
-        inserted = upsert_texts(chunks)
-        return True, f"✅ {inserted} passages indexés"
-    except Exception as e:
-        return False, f"❌ Erreur ingestion: {e}"
-
-
-def search_context(query: str, top_k: int = 4) -> Tuple[List[str], List[str]]:
-    """
-    Recherche contextuelle avec query_points.
-    Retourne (passages, sources_ids)
-    """
-    if not query or not query.strip():
-        return [], []
-
-    try:
-        vec = model.encode([query], normalize_embeddings=True)[0].tolist()
-
-        # ✅ ici on passe le vecteur directement au param 'query'
-        resp = client.query_points(
-            collection_name=COLLECTION,
-            query=vec,
-            with_payload=True,
-            with_vectors=False,
-            limit=top_k
+def cache_put(question: str, answer: str, sources: list):
+    with pg_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into answers_cache(q_hash, question_norm, answer, sources)
+            values(%s,%s,%s,%s)
+            on conflict (q_hash) do nothing
+            """,
+            (q_hash(question), normalize_q(question), answer, json.dumps(sources)),
         )
 
-        hits = resp.points
-        passages = [h.payload.get("text", "") for h in hits]
-        sources = [str(h.id) for h in hits]
-        return passages, sources
-    except Exception as e:
-        print(f"❌ Erreur search_context/query_points: {e}")
-        return [], []
+def _ensure_collection(client: QdrantClient):
+    # Crée la collection si elle n'existe pas
+    collections = client.get_collections().collections
+    names = {c.name for c in collections}
+    if QDRANT_COLLECTION not in names:
+        client.recreate_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=VectorParams(size=EMB_DIM, distance=Distance.COSINE),
+        )
+
+def embed(texts: List[str]) -> List[List[float]]:
+    # sentence-transformers (CPU ok)
+    from sentence_transformers import SentenceTransformer
+    model_name = os.getenv("EMB_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer(model_name)
+    return model.encode(texts, normalize_embeddings=True).tolist()
+
+def search(query: str, limit: int = 8):
+    client = QdrantClient(url=QDRANT_URL)
+    _ensure_collection(client)
+    vec = embed([query])[0]
+    res = client.search(collection_name=QDRANT_COLLECTION, query_vector=vec, limit=limit)
+    hits = [
+        {
+            "id": str(p.id),
+            "score": float(p.score),
+            "payload": p.payload or {}
+        }
+        for p in res
+    ]
+    return hits
+
+def upsert_chunks(chunks: List[str], source: str):
+    client = QdrantClient(url=QDRANT_URL)
+    _ensure_collection(client)
+    vecs = embed(chunks)
+    points = [
+        PointStruct(id=None, vector=v, payload={"text": c, "source": source, "type": "doc"})
+        for v, c in zip(vecs, chunks)
+    ]
+    client.upsert(collection_name=QDRANT_COLLECTION, points=points)
+    return len(points)
