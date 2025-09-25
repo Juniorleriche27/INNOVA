@@ -21,10 +21,9 @@ app = FastAPI(
 )
 
 # -------- CORS ----------
-# Origines par défaut (prod Vercel + previews + local)
-default_origins = {
-    "https://innova-qr1i.vercel.app",  # domaine prod
-    "https://*.vercel.app",            # previews Vercel (wildcard)
+# Origines explicites (prod Vercel + local)
+base_origins = {
+    "https://innova-qr1i.vercel.app",  # domaine prod exact
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 }
@@ -34,18 +33,19 @@ default_origins = {
 # - CORS_ORIGINS      : liste séparée par virgules
 env_origin = os.getenv("CORS_ALLOW_ORIGIN", "").strip()
 if env_origin:
-    default_origins.add(env_origin)
+    base_origins.add(env_origin)
 
 env_origins_csv = os.getenv("CORS_ORIGINS", "").strip()
 if env_origins_csv:
     for item in env_origins_csv.split(","):
         item = item.strip()
         if item:
-            default_origins.add(item)
+            base_origins.add(item)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(default_origins),
+    allow_origins=list(base_origins),
+    allow_origin_regex=r"https://.*\.vercel\.app",  # ✅ autorise toutes les previews Vercel
     allow_credentials=False,   # pas de cookies inter-origines
     allow_methods=["*"],
     allow_headers=["*"],

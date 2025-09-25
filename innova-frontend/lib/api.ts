@@ -1,6 +1,10 @@
 // innova-frontend/lib/api.ts
+
+// ⚠️ Base URL du BACKEND (Render). À définir dans Vercel : NEXT_PUBLIC_CHATLAYA_URL
+// Exemple: https://innova-1-v3ab.onrender.com
 const API =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  (process.env.NEXT_PUBLIC_CHATLAYA_URL || "").replace(/\/+$/, "") ||
+  "https://innova-1-v3ab.onrender.com";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
