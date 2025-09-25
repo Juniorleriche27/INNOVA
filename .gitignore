@@ -29,3 +29,11 @@ Thumbs.db
 Backend_backup/
 
 innova-frontend_backup/
+
+.env
+
+.env.*
+
+__pycache__/
+
+*.pyc
