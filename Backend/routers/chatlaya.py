@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from services.intent import detect_intent
 from services.router_ai import choose_and_complete
-from services import rag
+from services import rag_service as rag   # <-- fixed import
 import os
 
 router = APIRouter(tags=["chatlaya"])
