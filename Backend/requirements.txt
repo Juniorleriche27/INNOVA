@@ -2,18 +2,12 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pydantic[email]==2.9.2
 python-dotenv==1.0.1
-httpx==0.27.2
+httpx==0.25.2        # ✅ compatible avec postgrest 0.15.1
 postgrest==0.15.1
-
-# Déploiement / uploads
 python-multipart==0.0.9
 requests==2.32.3
-
-# ---- Chat-LAYA (IA/RAG) ----
+cohere==5.9.4
 openai==1.43.1
 qdrant-client==1.10.1
 sentence-transformers==3.0.1
-cohere==5.9.4
-
-# Postgres (Option A)
 psycopg[binary]==3.2.1
