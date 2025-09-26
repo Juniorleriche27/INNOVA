@@ -4,8 +4,8 @@ import time
 from typing import Dict, Any, Optional
 from .intent import IntentResult
 
-USE_MISTRAL = bool(os.getenv("MISTRAL_API_KEY"))
-USE_COHERE  = bool(os.getenv("COHERE_API_KEY"))
+# On ne retient que Cohere. La présence d'une clé Mistral n'influence plus le choix.
+USE_COHERE = bool(os.getenv("COHERE_API_KEY"))
 
 # ---- Paramètres par intent (avec fallback .env) ----
 def _f(name: str, default: float) -> float:
@@ -28,82 +28,67 @@ PARAMS_BY_INTENT = {
     "default":   {"temperature": _f("TEMP_DEFAULT", 0.4),   "max_tokens": _i("TOKENS_DEFAULT", 800)},
 }
 
-def _params_for(intent_name: str, override_temp: Optional[float], override_max: Optional[int]) -> tuple[float,int]:
+def _params_for(intent_name: str, override_temp: Optional[float], override_max: Optional[int]) -> tuple[float, int]:
     base = PARAMS_BY_INTENT.get(intent_name, PARAMS_BY_INTENT["default"])
     t = override_temp if override_temp is not None else base["temperature"]
     m = override_max  if override_max  is not None else base["max_tokens"]
     return t, m
 
-# ---- Providers ----
-def _mistral_complete(prompt: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
-    import requests
-    model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
-    headers = {"Authorization": f"Bearer {os.getenv('MISTRAL_API_KEY')}"}
-    t0 = time.time()
-    r = requests.post(
-        "https://api.mistral.ai/v1/chat/completions",
-        headers=headers,
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        },
-        timeout=60
-    )
-    r.raise_for_status()
-    data = r.json()
-    text = data["choices"][0]["message"]["content"]
-    return {"provider": "mistral", "model": model, "text": text, "latency_ms": int((time.time() - t0) * 1000)}
-
-def _cohere_complete(prompt: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
+# ---- Cohere ----
+def _cohere_complete(prompt: str, temperature: float, max_tokens: int, model_name: Optional[str] = None) -> Dict[str, Any]:
     import cohere
-    client = cohere.Client(os.getenv("COHERE_API_KEY"))
-    model = os.getenv("COHERE_MODEL", "command-r-plus")
-    t0 = time.time()
-    resp = client.chat(
-        model=model,
-        message=prompt,
-        temperature=temperature,
-        max_tokens=max_tokens
-    )
-    text = resp.text
-    return {"provider": "cohere", "model": model, "text": text, "latency_ms": int((time.time() - t0) * 1000)}
+    api_key = os.getenv("COHERE_API_KEY")
+    if not api_key:
+        # On renvoie une erreur contrôlée (le caller peut la formater)
+        return {"provider": "error", "model": "-", "text": "COHERE_API_KEY manquante", "latency_ms": 0}
 
-# ---- Sélection + exécution (un seul provider) ----
+    model = model_name or os.getenv("COHERE_MODEL", "command-r")
+    t0 = time.time()
+    try:
+        client = cohere.Client(api_key)
+        # Le SDK Cohere accepte soit `message=str`, soit `messages=[...]` selon version.
+        # Ici on utilise `message=` pour rester compatible avec le code existant.
+        resp = client.chat(
+            model=model,
+            message=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        text = (getattr(resp, "text", "") or "").strip() or "(réponse vide)"
+        return {
+            "provider": "cohere",
+            "model": model,
+            "text": text,
+            "latency_ms": int((time.time() - t0) * 1000)
+        }
+    except Exception as e:
+        return {"provider": "error", "model": model, "text": f"Erreur Cohere: {e}", "latency_ms": 0}
+
+# ---- Sélection + exécution (Cohere-only) ----
 def choose_and_complete(
     intent: IntentResult,
     prompt: str,
     override_temperature: Optional[float] = None,
     override_max_tokens: Optional[int] = None,
-    force_provider: Optional[str] = None  # "mistral" | "cohere"
+    force_provider: Optional[str] = None,
+    **kwargs: Any,  # <--- on avale tout (ex: force_model) pour éviter "unexpected keyword argument"
 ) -> Dict[str, Any]:
-
+    """
+    Routeur de complétion Cohere-only.
+    - Ignore force_provider (on force Cohere).
+    - Supporte un "force_model" éventuel via kwargs sans planter.
+    """
     temperature, max_tokens = _params_for(intent.intent, override_temperature, override_max_tokens)
 
-    # Force provider si demandé
-    if force_provider == "mistral" and USE_MISTRAL:
-        return _mistral_complete(prompt, temperature, max_tokens)
-    if force_provider == "cohere" and USE_COHERE:
-        return _cohere_complete(prompt, temperature, max_tokens)
-
-    # Politique par intent (fallback si indispo)
+    # Support optionnel d’un modèle imposé depuis l’UI sans crasher si absent
+    model_name = None
     try:
-        if intent.intent in ("translate", "summarize") and USE_MISTRAL:
-            return _mistral_complete(prompt, temperature, max_tokens)
+        model_name = kwargs.get("force_model") or os.getenv("COHERE_MODEL", "command-r")
+    except Exception:
+        model_name = os.getenv("COHERE_MODEL", "command-r")
 
-        if intent.intent == "qa" and USE_COHERE:
-            return _cohere_complete(prompt, temperature, max_tokens)
+    # Toujours Cohere
+    if not USE_COHERE:
+        return {"provider": "none", "model": "none", "text": "Aucun provider IA configuré (Cohere manquant).", "latency_ms": 0}
 
-        if intent.intent == "gen_long" and USE_COHERE:
-            return _cohere_complete(prompt, temperature, max_tokens)
-
-        if USE_MISTRAL:
-            return _mistral_complete(prompt, temperature, max_tokens)
-
-        if USE_COHERE:
-            return _cohere_complete(prompt, temperature, max_tokens)
-
-        return {"provider": "none", "model": "none", "text": "Aucun provider IA configuré.", "latency_ms": 0}
-    except Exception as e:
-        return {"provider": "error", "model": "-", "text": f"Erreur provider: {e}", "latency_ms": 0}
+    return _cohere_complete(prompt, temperature, max_tokens, model_name=model_name)

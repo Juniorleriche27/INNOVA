@@ -10,7 +10,7 @@ class AskBody(BaseModel):
     question: str
     temperature: float | None = None
     max_tokens: int | None = None
-    # Gardé pour compatibilité, mais seul "cohere" est accepté pour l’instant
+    # Compat, mais seul "cohere" est accepté
     provider: str | None = None
 
     @field_validator("question")
@@ -26,7 +26,6 @@ def ask(body: AskBody):
     if not api_key:
         raise HTTPException(500, "COHERE_API_KEY manquante sur le backend")
 
-    # Modèle Cohere par défaut (modifiable via variable d'env)
     model = os.getenv("COHERE_MODEL", "command-r")
     temperature = 0.3 if body.temperature is None else float(body.temperature)
     max_tokens = 300 if body.max_tokens is None else int(body.max_tokens)
@@ -37,6 +36,7 @@ def ask(body: AskBody):
 
     try:
         co = cohere.Client(api_key=api_key)
+        # Ici, on utilise `messages=[...]` (fonctionne avec les SDKs récents).
         resp = co.chat(
             model=model,
             messages=[{"role": "user", "content": body.question}],
@@ -44,6 +44,7 @@ def ask(body: AskBody):
             max_tokens=max_tokens,
         )
         text = (getattr(resp, "text", "") or "").strip() or "(réponse vide)"
+
         usage = None
         try:
             m = getattr(resp, "meta", None)
@@ -55,6 +56,7 @@ def ask(body: AskBody):
                 }
         except Exception:
             usage = None
+
     except Exception as e:
         raise HTTPException(502, f"Echec Cohere: {e}")
 
