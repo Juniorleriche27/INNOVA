@@ -2,18 +2,16 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 import os
-import logging
 
-from services.router_ai import choose_and_complete
+from services.router_ai import choose_and_complete  # ta fonction existante
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
+router = APIRouter(tags=["chatlaya"])
 
 class AskBody(BaseModel):
     question: str
-    temperature: float | None = None
-    max_tokens: int | None = None
-    provider: str | None = None  # "mistral" | "cohere"
+    temperature: float | None = None     # optionnel
+    max_tokens: int | None = None        # optionnel
+    provider: str | None = None          # "mistral" | "cohere"
 
     @field_validator("question")
     @classmethod
@@ -24,12 +22,12 @@ class AskBody(BaseModel):
 
 @router.post("/ask")
 def ask(body: AskBody):
-    # Defaults
+    # Defaults sûrs
     provider = (body.provider or "mistral").lower()
     temperature = body.temperature if body.temperature is not None else 0.3
     max_tokens = body.max_tokens if body.max_tokens is not None else 300
 
-    # Vérification des clés / modèles
+    # Vérif des clés + choix modèle par provider
     if provider == "mistral":
         if not os.getenv("MISTRAL_API_KEY"):
             raise HTTPException(500, "MISTRAL_API_KEY manquante sur le backend")
@@ -41,6 +39,7 @@ def ask(body: AskBody):
     else:
         raise HTTPException(400, f"Provider non supporté: {provider}")
 
+    # Prompt simple
     prompt = f"Réponds brièvement et clairement.\nQuestion: {body.question}"
 
     try:
@@ -53,11 +52,11 @@ def ask(body: AskBody):
             force_model=model,
         )
     except Exception as e:
-        logger.exception("Erreur Chat-LAYA")
+        # renvoyer une erreur lisible
         raise HTTPException(502, f"Echec provider {provider}: {e}")
 
     return {
-        "answer": result.get("text", "").strip() or "(réponse vide)",
+        "answer": (result.get("text") or "").strip() or "(réponse vide)",
         "provider": result.get("provider", provider),
         "model": result.get("model", model),
         "tokens": result.get("usage"),
