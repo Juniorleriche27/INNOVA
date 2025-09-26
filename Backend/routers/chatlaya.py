@@ -1,56 +1,62 @@
-# routers/chatlaya.py (extrait pertinent)
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-from services.intent import detect_intent
-from services.router_ai import choose_and_complete
-from services import rag_service as rag   # <-- fixed import
+# Backend/routers/chatlaya.py
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, field_validator
 import os
 
-router = APIRouter(tags=["chatlaya"])
+from services.router_ai import choose_and_complete  # garde ta fonction existante
+
+router = APIRouter()
 
 class AskBody(BaseModel):
     question: str
-    temperature: Optional[float] = None   # override optionnel
-    max_tokens: Optional[int] = None      # override optionnel
-    provider: Optional[str] = None        # "mistral" | "cohere" (optionnel)
+    temperature: float | None = None
+    max_tokens: int | None = None
+    provider: str | None = None  # "mistral" | "cohere" | etc.
+
+    @field_validator("question")
+    @classmethod
+    def not_empty(cls, v: str):
+        if not v or not v.strip():
+            raise ValueError("question vide")
+        return v.strip()
 
 @router.post("/ask")
 def ask(body: AskBody):
-    q = (body.question or "").strip()
-    if not q:
-        raise HTTPException(400, "question vide")
+    # Defaults sûrs
+    provider = (body.provider or "mistral").lower()
+    temperature = body.temperature if body.temperature is not None else 0.3
+    max_tokens = body.max_tokens if body.max_tokens is not None else 300
 
-    cached = rag.cache_get(q)
-    if cached:
-        answer, sources = cached
-        return {"answer": answer, "sources": sources, "cached": True}
+    # Vérif des clés selon provider
+    if provider == "mistral":
+        if not os.getenv("MISTRAL_API_KEY"):
+            raise HTTPException(500, "MISTRAL_API_KEY manquante sur le backend")
+        model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+    elif provider == "cohere":
+        if not os.getenv("COHERE_API_KEY"):
+            raise HTTPException(500, "COHERE_API_KEY manquante sur le backend")
+        model = os.getenv("COHERE_MODEL", "command-r-plus")
+    else:
+        raise HTTPException(400, f"Provider non supporté: {provider}")
 
-    hits = rag.search(q, limit=8)
-    context = ""
-    top = [h for h in hits if h.get("score", 0) > 0.35][:5]
-    if top:
-        context = "\n\n".join((h.get("payload", {}) or {}).get("text", "") for h in top)
-
-    intent = detect_intent(q)
-    prompt = f"""Tu es Chat-LAYA. Réponds de façon concise et factuelle.
-[QUESTION] {q}
-[CONTEXTE] {context if context else "N/A"}
-Si le contexte est insuffisant, dis-le clairement et propose une piste.
-"""
-    result = choose_and_complete(
-        intent,
-        prompt,
-        override_temperature=body.temperature,
-        override_max_tokens=body.max_tokens,
-        force_provider=body.provider
-    )
-    answer = result.get("text", "(pas de texte)")
-    sources = top
+    prompt = f"Réponds brièvement et clairement.\nQuestion: {body.question}"
 
     try:
-        rag.cache_put(q, answer, sources)
-    except Exception:
-        pass
+        result = choose_and_complete(
+            intent="qa",
+            prompt=prompt,
+            override_temperature=temperature,
+            override_max_tokens=max_tokens,
+            force_provider=provider,
+            force_model=model,
+        )
+    except Exception as e:
+        # remonte une erreur lisible au lieu d'un 500 générique
+        raise HTTPException(502, f"Echec provider {provider}: {e}")
 
-    return {"answer": answer, "sources": sources, "provider": result.get("provider"), "model": result.get("model")}
+    return {
+        "answer": result.get("text", "").strip() or "(réponse vide)",
+        "provider": result.get("provider", provider),
+        "model": result.get("model", model),
+        "tokens": result.get("usage"),
+    }
