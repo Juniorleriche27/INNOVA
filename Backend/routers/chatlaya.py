@@ -2,16 +2,16 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 import os
-
-from services.router_ai import choose_and_complete  # ta fonction existante
+import cohere
 
 router = APIRouter(tags=["chatlaya"])
 
 class AskBody(BaseModel):
     question: str
-    temperature: float | None = None     # optionnel
-    max_tokens: int | None = None        # optionnel
-    provider: str | None = None          # "mistral" | "cohere"
+    temperature: float | None = None
+    max_tokens: int | None = None
+    # Gardé pour compatibilité, mais seul "cohere" est accepté pour l’instant
+    provider: str | None = None
 
     @field_validator("question")
     @classmethod
@@ -22,42 +22,45 @@ class AskBody(BaseModel):
 
 @router.post("/ask")
 def ask(body: AskBody):
-    # Defaults sûrs
-    provider = (body.provider or "mistral").lower()
-    temperature = body.temperature if body.temperature is not None else 0.3
-    max_tokens = body.max_tokens if body.max_tokens is not None else 300
+    api_key = os.getenv("COHERE_API_KEY")
+    if not api_key:
+        raise HTTPException(500, "COHERE_API_KEY manquante sur le backend")
 
-    # Vérif des clés + choix modèle par provider
-    if provider == "mistral":
-        if not os.getenv("MISTRAL_API_KEY"):
-            raise HTTPException(500, "MISTRAL_API_KEY manquante sur le backend")
-        model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
-    elif provider == "cohere":
-        if not os.getenv("COHERE_API_KEY"):
-            raise HTTPException(500, "COHERE_API_KEY manquante sur le backend")
-        model = os.getenv("COHERE_MODEL", "command-r-plus")
-    else:
-        raise HTTPException(400, f"Provider non supporté: {provider}")
+    # Modèle Cohere par défaut (modifiable via variable d'env)
+    model = os.getenv("COHERE_MODEL", "command-r")
+    temperature = 0.3 if body.temperature is None else float(body.temperature)
+    max_tokens = 300 if body.max_tokens is None else int(body.max_tokens)
 
-    # Prompt simple
-    prompt = f"Réponds brièvement et clairement.\nQuestion: {body.question}"
+    # Refuse tout autre provider s'il est passé
+    if body.provider and body.provider.lower() != "cohere":
+        raise HTTPException(400, f"Seul 'cohere' est supporté (reçu: {body.provider!r})")
 
     try:
-        result = choose_and_complete(
-            intent="qa",
-            prompt=prompt,
-            override_temperature=temperature,
-            override_max_tokens=max_tokens,
-            force_provider=provider,
-            force_model=model,
+        co = cohere.Client(api_key=api_key)
+        resp = co.chat(
+            model=model,
+            messages=[{"role": "user", "content": body.question}],
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
+        text = (getattr(resp, "text", "") or "").strip() or "(réponse vide)"
+        usage = None
+        try:
+            m = getattr(resp, "meta", None)
+            if m and getattr(m, "tokens", None):
+                usage = {
+                    "input_tokens": getattr(m.tokens, "input_tokens", None),
+                    "output_tokens": getattr(m.tokens, "output_tokens", None),
+                    "total_tokens": getattr(m.tokens, "total_tokens", None),
+                }
+        except Exception:
+            usage = None
     except Exception as e:
-        # renvoyer une erreur lisible
-        raise HTTPException(502, f"Echec provider {provider}: {e}")
+        raise HTTPException(502, f"Echec Cohere: {e}")
 
     return {
-        "answer": (result.get("text") or "").strip() or "(réponse vide)",
-        "provider": result.get("provider", provider),
-        "model": result.get("model", model),
-        "tokens": result.get("usage"),
+        "answer": text,
+        "provider": "cohere",
+        "model": model,
+        "tokens": usage,
     }
