@@ -10,7 +10,7 @@ class AskBody(BaseModel):
     question: str
     temperature: float | None = None
     max_tokens: int | None = None
-    # Compat, mais seul "cohere" est accepté
+    # Gardé pour compat, mais seul "cohere" est accepté
     provider: str | None = None
 
     @field_validator("question")
@@ -30,16 +30,16 @@ def ask(body: AskBody):
     temperature = 0.3 if body.temperature is None else float(body.temperature)
     max_tokens = 300 if body.max_tokens is None else int(body.max_tokens)
 
-    # Refuse tout autre provider s'il est passé
+    # Refuse tout autre provider
     if body.provider and body.provider.lower() != "cohere":
         raise HTTPException(400, f"Seul 'cohere' est supporté (reçu: {body.provider!r})")
 
     try:
         co = cohere.Client(api_key=api_key)
-        # Ici, on utilise `messages=[...]` (fonctionne avec les SDKs récents).
+        # IMPORTANT : Cohere attend 'message=' (string), pas 'messages='
         resp = co.chat(
             model=model,
-            messages=[{"role": "user", "content": body.question}],
+            message=body.question,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -58,6 +58,7 @@ def ask(body: AskBody):
             usage = None
 
     except Exception as e:
+        # renvoie une 502 pour que le front affiche l'erreur proprement
         raise HTTPException(502, f"Echec Cohere: {e}")
 
     return {
