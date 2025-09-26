@@ -5,16 +5,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-const CHAT_URL = process.env.NEXT_PUBLIC_CHATLAYA_URL || "/chat-laya";
+// 🚫 NE PAS utiliser NEXT_PUBLIC_CHATLAYA_URL ici (c’est pour les appels API).
+// ✅ La navigation du menu doit rester interne au front :
+const CHAT_ROUTE = "/chat-laya";
 
 function NavLink(props: { href: string; children: React.ReactNode }) {
   const { href, children } = props;
   const pathname = usePathname();
   const active = pathname === href;
 
-  // Avec Next 15 + typedRoutes, Link vérifie que la route existe.
-  // Pour éviter les erreurs pendant la mise en place des pages (about, contact, etc.),
-  // on neutralise *uniquement ici* le typage du href.
   return (
     <Link
       href={href as unknown as any}
@@ -33,7 +32,6 @@ export default function Headbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
-  // ✅ refs doivent accepter null en initialisation
   const authRef = useRef<HTMLDivElement | null>(null);
   const moreRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,19 +74,8 @@ export default function Headbar() {
             <NavLink href="/about">À propos</NavLink>
             <NavLink href="/contact">Contact</NavLink>
 
-            {/* Chat-LAYA : externe si URL absolue, sinon route interne */}
-            {CHAT_URL.startsWith("http") ? (
-              <a
-                href={CHAT_URL}
-                className="no-underline px-2 py-1 rounded text-[13px] font-medium text-gray-700 hover:text-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500"
-                target="_self"
-                rel="noopener noreferrer"
-              >
-                Chat-LAYA
-              </a>
-            ) : (
-              <NavLink href={CHAT_URL}>Chat-LAYA</NavLink>
-            )}
+            {/* Chat-LAYA toujours en navigation interne */}
+            <NavLink href={CHAT_ROUTE}>Chat-LAYA</NavLink>
 
             {/* Plus */}
             <div className="relative" ref={moreRef}>
@@ -150,11 +137,7 @@ export default function Headbar() {
           <NavLink href="/">Accueil</NavLink>
           <NavLink href="/about">À propos</NavLink>
           <NavLink href="/contact">Contact</NavLink>
-          {CHAT_URL.startsWith("http") ? (
-            <a href={CHAT_URL} className="block px-2 py-2 rounded hover:bg-gray-50 no-underline">Chat-LAYA</a>
-          ) : (
-            <NavLink href={CHAT_URL}>Chat-LAYA</NavLink>
-          )}
+          <NavLink href={CHAT_ROUTE}>Chat-LAYA</NavLink>
           <NavLink href="/community">Communauté</NavLink>
           <NavLink href="/marketplace">Marketplace</NavLink>
           <NavLink href="/blog">Blog</NavLink>
