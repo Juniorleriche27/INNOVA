@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
+from qdrant_client import QdrantClient
 
 # Routers existants
 from routers import domain, project, contributor, technology
@@ -81,13 +82,18 @@ app.include_router(chatlaya.router, prefix="/chatlaya", tags=["chat-laya"])
 # (Conserve ceci seulement si ton services/rag_service.py expose bien 'client')
 from services.rag_service import client
 
+# -------- Test Qdrant --------
+
 @app.get("/qdrant-test")
 def qdrant_test():
-    """
-    Test simple de connexion à Qdrant.
-    """
+    """Test simple de connexion à Qdrant (sans import global)."""
     try:
+        qdrant_url = os.getenv("QDRANT_URL")
+        if not qdrant_url:
+            return {"error": "QDRANT_URL manquant"}
+        client = QdrantClient(url=qdrant_url)
         info = client.get_collections()
         return {"collections": [c.name for c in info.collections]}
     except Exception as e:
         return {"error": str(e)}
+
