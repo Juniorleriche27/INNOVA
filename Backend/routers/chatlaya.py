@@ -2,16 +2,18 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 import os
+import logging
 
-from services.router_ai import choose_and_complete  # garde ta fonction existante
+from services.router_ai import choose_and_complete
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class AskBody(BaseModel):
     question: str
     temperature: float | None = None
     max_tokens: int | None = None
-    provider: str | None = None  # "mistral" | "cohere" | etc.
+    provider: str | None = None  # "mistral" | "cohere"
 
     @field_validator("question")
     @classmethod
@@ -22,12 +24,12 @@ class AskBody(BaseModel):
 
 @router.post("/ask")
 def ask(body: AskBody):
-    # Defaults sûrs
+    # Defaults
     provider = (body.provider or "mistral").lower()
     temperature = body.temperature if body.temperature is not None else 0.3
     max_tokens = body.max_tokens if body.max_tokens is not None else 300
 
-    # Vérif des clés selon provider
+    # Vérification des clés / modèles
     if provider == "mistral":
         if not os.getenv("MISTRAL_API_KEY"):
             raise HTTPException(500, "MISTRAL_API_KEY manquante sur le backend")
@@ -51,7 +53,7 @@ def ask(body: AskBody):
             force_model=model,
         )
     except Exception as e:
-        # remonte une erreur lisible au lieu d'un 500 générique
+        logger.exception("Erreur Chat-LAYA")
         raise HTTPException(502, f"Echec provider {provider}: {e}")
 
     return {
