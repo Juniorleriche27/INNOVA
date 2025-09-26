@@ -5,7 +5,7 @@ import os
 import re
 from typing import List, Tuple, Optional
 
-import psycopg2
+import psycopg  # <-- psycopg v3
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
@@ -26,7 +26,8 @@ def q_hash(q: str) -> str:
 def pg_conn():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL manquant")
-    return psycopg2.connect(DATABASE_URL)
+    # psycopg v3
+    return psycopg.connect(DATABASE_URL)
 
 def cache_get(question: str) -> Optional[Tuple[str, list]]:
     with pg_conn() as conn, conn.cursor() as cur:
