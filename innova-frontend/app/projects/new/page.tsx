@@ -15,12 +15,6 @@ type CreateProjectPayload = {
   status?: string | null;
 };
 
-type CreatedProject = {
-  id: string;
-  name: string;
-  slug: string;
-};
-
 export default function NewProjectPage() {
   const router = useRouter();
   const [loading, setLoading] = useState<boolean>(false);
@@ -69,7 +63,7 @@ export default function NewProjectPage() {
         throw new Error(`Échec API (${res.status}): ${text}`);
       }
 
-      const created: CreatedProject = (await res.json()) as CreatedProject;
+      await res.json();
 
       // Redirection après création : vers la liste ou un détail si dispo
       router.push("/projects");

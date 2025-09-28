@@ -25,6 +25,15 @@ type ChatTurn = { role: "user" | "assistant"; text: string; sources?: Hit[] };
 
 /** Petit util */
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const errorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Erreur inconnue";
+  }
+};
 
 /** Page */
 export default function ChatLayaPage() {
@@ -126,8 +135,8 @@ export default function ChatLayaPage() {
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { hits?: Hit[] };
       setHits(data?.hits ?? []);
-    } catch (e: any) {
-      setErr(e?.message || "Erreur inconnue");
+    } catch (error) {
+      setErr(errorMessage(error));
     } finally {
       setLoading(false);
       setElapsed(performance.now() - t0);
@@ -147,16 +156,19 @@ export default function ChatLayaPage() {
       const res = await fetch(`${API}/chatlaya/ask`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, top_k: 8 }),
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as { answer: string; sources?: Hit[] };
+      const data = (await res.json()) as { answer: string; sources?: Hit[]; rag_error?: string };
       const assistant: ChatTurn = { role: "assistant", text: data.answer, sources: data.sources };
+      if (data.rag_error) {
+        assistant.text += `\n\n⚠️ Contexte indisponible: ${data.rag_error}`;
+      }
       setTurns((t) => [...t, assistant]);
-    } catch (e: any) {
+    } catch (error) {
       const assistant: ChatTurn = {
         role: "assistant",
-        text: `❌ Erreur: ${e?.message || "inconnue"}`,
+        text: `❌ Erreur: ${errorMessage(error)}`,
       };
       setTurns((t) => [...t, assistant]);
     } finally {
@@ -179,11 +191,11 @@ export default function ChatLayaPage() {
     try {
       const fd = new FormData();
       Array.from(files).forEach((f) => fd.append("file", f));
-      const res = await fetch(`${API}/ingest`, { method: "POST", body: fd });
+      const res = await fetch(`${API}/chatlaya/ingest`, { method: "POST", body: fd });
       if (!res.ok) throw new Error(await res.text());
       // Optionnel: toast OK
-    } catch (e: any) {
-      setUploadErr(e?.message || "Upload échoué");
+    } catch (error) {
+      setUploadErr(errorMessage(error) || "Upload échoué");
     } finally {
       setUploading(false);
     }
@@ -208,26 +220,32 @@ export default function ChatLayaPage() {
   });
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-8">
+    <main className="mx-auto w-full max-w-6xl space-y-8 px-6 py-10">
       {/* Header + actions */}
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Chat-LAYA</h1>
-          <p className="text-gray-600 dark:text-gray-300">RAG & Chat sur vos documents.</p>
+      <div className="mb-8 flex flex-col gap-6 rounded-3xl bg-white/80 p-8 shadow-xl ring-1 ring-black/5 backdrop-blur md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2">
+          <span className="inline-flex items-center rounded-full bg-blue-50 px-4 py-1 text-sm font-medium text-blue-600">
+            INNOVA · Assistant documentaire
+          </span>
+          <div>
+            <h1 className="text-4xl font-semibold tracking-tight text-gray-900">Chat-LAYA</h1>
+            <p className="text-base text-gray-500">Un hub unique pour rechercher, discuter et enrichir vos ressources.</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Dark mode */}
           <button
             onClick={() => setDark((v) => !v)}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="inline-flex items-center gap-2 rounded-full border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
             title="Basculer thème"
           >
-            {dark ? "🌙" : "☀️"}
+            <span className="text-lg">{dark ? "🌙" : "☀️"}</span>
+            <span className="hidden sm:inline">Thème</span>
           </button>
 
           {/* Upload bouton */}
-          <label className="cursor-pointer rounded bg-emerald-600 text-white px-3 py-2 text-sm hover:bg-emerald-700">
-            {uploading ? "Ingestion…" : "Uploader des docs"}
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 hover:shadow">
+            <span>{uploading ? "Ingestion…" : "Ajouter des documents"}</span>
             <input
               type="file"
               multiple
@@ -239,16 +257,24 @@ export default function ChatLayaPage() {
       </div>
 
       {/* Onglets */}
-      <div className="mb-4 inline-flex rounded border bg-white dark:bg-gray-900">
+      <div className="mb-5 inline-flex rounded-full bg-gray-100 p-1 text-sm font-medium text-gray-500 shadow-inner dark:bg-gray-800 dark:text-gray-300">
         <button
           onClick={() => setTab("search")}
-          className={`px-4 py-2 text-sm rounded-l ${tab === "search" ? "bg-blue-600 text-white" : "hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+          className={`rounded-full px-5 py-2 transition ${
+            tab === "search"
+              ? "bg-white text-gray-900 shadow-sm ring-1 ring-black/5"
+              : "hover:text-gray-700 dark:hover:text-gray-100"
+          }`}
         >
           🔎 Recherche
         </button>
         <button
           onClick={() => setTab("chat")}
-          className={`px-4 py-2 text-sm rounded-r border-l ${tab === "chat" ? "bg-blue-600 text-white" : "hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+          className={`rounded-full px-5 py-2 transition ${
+            tab === "chat"
+              ? "bg-white text-gray-900 shadow-sm ring-1 ring-black/5"
+              : "hover:text-gray-700 dark:hover:text-gray-100"
+          }`}
         >
           💬 Chat
         </button>
@@ -258,7 +284,7 @@ export default function ChatLayaPage() {
       <DropZone onFiles={onFiles} disabled={uploading} />
 
       {uploadErr && (
-        <div className="mt-2 rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        <div className="mt-2 rounded-2xl bg-red-50 px-4 py-2 text-sm font-medium text-red-700 shadow-sm">
           {uploadErr}
         </div>
       )}
@@ -266,23 +292,23 @@ export default function ChatLayaPage() {
       {tab === "search" ? (
         <section className="mt-6">
           {/* Barre de recherche */}
-          <form onSubmit={onSubmitSearch} className="mb-4" role="search">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔎</span>
+          <form onSubmit={onSubmitSearch} className="mb-6" role="search">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <div className="relative flex-1 rounded-full bg-gray-100/80 px-6 py-3 shadow-sm transition focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-500 dark:bg-gray-900/60">
+                <span className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-lg text-gray-400">🔎</span>
                 <input
                   ref={inputRef}
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Pose ta question… (Ctrl/Cmd+K)"
-                  className="w-full rounded border px-9 py-2 text-[15px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border-none bg-transparent pl-10 text-[15px] text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100"
                   aria-label="Saisir la requête"
                 />
                 {q && (
                   <button
                     type="button"
                     onClick={() => setQ("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-600"
                     aria-label="Effacer"
                     title="Effacer (Esc)"
                   >
@@ -292,7 +318,7 @@ export default function ChatLayaPage() {
               </div>
               <button
                 type="submit"
-                className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!q.trim() || loading}
               >
                 {loading ? "Recherche…" : "Rechercher"}
@@ -302,12 +328,12 @@ export default function ChatLayaPage() {
 
           {/* Filtres */}
           {ran && (
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-gray-500">Filtres :</span>
+            <div className="mb-6 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+              <span className="font-medium text-gray-500">Filtres :</span>
               <select
                 value={filterSource}
                 onChange={(e) => setFilterSource(e.target.value)}
-                className="rounded border px-2 py-1 bg-white dark:bg-gray-900"
+                className="rounded-full border-none bg-gray-100 px-4 py-1.5 text-sm text-gray-700 shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-gray-800 dark:text-gray-200"
                 aria-label="Filtrer par source"
               >
                 {sources.map((s) => (
@@ -317,7 +343,7 @@ export default function ChatLayaPage() {
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value)}
-                className="rounded border px-2 py-1 bg-white dark:bg-gray-900"
+                className="rounded-full border-none bg-gray-100 px-4 py-1.5 text-sm text-gray-700 shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-gray-800 dark:text-gray-200"
                 aria-label="Filtrer par type"
               >
                 {types.map((t) => (
@@ -325,7 +351,7 @@ export default function ChatLayaPage() {
                 ))}
               </select>
 
-              <div className="ml-auto text-xs text-gray-500">
+              <div className="ml-auto text-xs text-gray-400">
                 {elapsed != null && <>⏱ {Math.round(elapsed)}ms · </>}
                 📄 {filtered.length} / {hits.length}
               </div>
@@ -334,7 +360,7 @@ export default function ChatLayaPage() {
 
           {/* Erreur */}
           {err && (
-            <div className="mb-3 rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            <div className="mb-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700 shadow-sm">
               {err}
             </div>
           )}
@@ -344,7 +370,7 @@ export default function ChatLayaPage() {
 
           {/* Vide */}
           {!loading && !err && hits.length === 0 && ran && (
-            <div className="rounded border bg-white dark:bg-gray-900 px-4 py-10 text-center text-gray-600">
+            <div className="rounded-3xl bg-gray-50 px-4 py-12 text-center text-gray-500 shadow-inner dark:bg-gray-900/40">
               <div className="text-4xl mb-2">🗂️</div>
               Aucun résultat. Essaie de préciser la question ou d’uploader des documents.
             </div>
@@ -360,10 +386,12 @@ export default function ChatLayaPage() {
           {/* Historique chat */}
           <div
             ref={scrollRef}
-            className="mb-3 max-h-[55vh] overflow-auto rounded border bg-white dark:bg-gray-900 p-4"
+            className="mb-4 max-h-[55vh] overflow-auto rounded-3xl bg-gray-50 p-6 shadow-inner dark:bg-gray-900/60"
           >
             {turns.length === 0 && !thinking && (
-              <div className="text-center text-gray-600">Commence une conversation avec tes documents.</div>
+              <div className="text-center text-gray-500">
+                Commence une conversation avec tes documents.
+              </div>
             )}
             {turns.map((t, i) => (
               <Bubble key={i} role={t.role} text={t.text} sources={t.sources} />
@@ -372,7 +400,7 @@ export default function ChatLayaPage() {
           </div>
 
           {/* Entrée chat */}
-          <form onSubmit={onSubmitChat} className="flex items-start gap-2">
+          <form onSubmit={onSubmitChat} className="flex flex-col gap-3 rounded-3xl bg-white/70 p-4 shadow-xl ring-1 ring-black/5 backdrop-blur md:flex-row md:items-end">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -384,11 +412,11 @@ export default function ChatLayaPage() {
                 }
               }}
               rows={3}
-              className="flex-1 rounded border px-3 py-2 text-[15px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 resize-none rounded-2xl border border-transparent bg-gray-50 px-4 py-3 text-[15px] text-gray-900 shadow-inner transition focus:border-blue-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100"
             />
             <button
               type="submit"
-              className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={!prompt.trim() || thinking}
             >
               Envoyer
@@ -413,10 +441,19 @@ function DropZone({ onFiles, disabled }: { onFiles: (f: FileList | null) => void
         setOver(false);
         if (!disabled) onFiles(e.dataTransfer.files);
       }}
-      className={`rounded border px-4 py-4 text-sm ${over ? "bg-blue-50 border-blue-300" : "bg-white dark:bg-gray-900"}`}
+      className={`group flex items-center justify-center rounded-3xl border border-dashed px-6 py-6 text-sm transition ${
+        over
+          ? "border-blue-300 bg-blue-50 text-blue-600"
+          : "border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-gray-700/60 dark:bg-gray-900/40 dark:text-gray-300"
+      }`}
       aria-label="Zone d'import de documents (glisser-déposer)"
     >
-      <b>Importer des documents</b> — Glisse tes fichiers ici ou utilise le bouton “Uploader des docs”.
+      <span className="inline-flex items-center gap-3 text-sm font-medium">
+        <span className="grid h-10 w-10 place-items-center rounded-full bg-white text-lg shadow-sm ring-1 ring-black/5 dark:bg-gray-900/70">
+          📁
+        </span>
+        Déposez vos fichiers ici
+      </span>
     </div>
   );
 }
@@ -425,11 +462,11 @@ function SkeletonList({ count = 4 }: { count?: number }) {
   return (
     <div className="space-y-3" aria-live="polite">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="animate-pulse rounded border bg-white dark:bg-gray-900 px-4 py-4">
-          <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded" />
-          <div className="mt-2 h-3 w-[90%] bg-gray-200 dark:bg-gray-800 rounded" />
-          <div className="mt-1 h-3 w-[75%] bg-gray-200 dark:bg-gray-800 rounded" />
-          <div className="mt-3 h-2 w-[30%] bg-gray-200 dark:bg-gray-800 rounded" />
+        <div key={i} className="animate-pulse rounded-3xl bg-gray-100/80 px-5 py-5 shadow-inner dark:bg-gray-900/40">
+          <div className="h-4 w-40 rounded bg-gray-300/70 dark:bg-gray-700" />
+          <div className="mt-2 h-3 w-[90%] rounded bg-gray-300/70 dark:bg-gray-700" />
+          <div className="mt-1 h-3 w-[75%] rounded bg-gray-300/70 dark:bg-gray-700" />
+          <div className="mt-3 h-2 w-[30%] rounded bg-gray-300/70 dark:bg-gray-700" />
         </div>
       ))}
     </div>
@@ -443,17 +480,20 @@ function ResultsList({ hits, query }: { hits: Hit[]; query: string }) {
   );
 
   return (
-    <div className="space-y-3" aria-live="polite">
+    <div className="space-y-4" aria-live="polite">
       {hits.map((h) => {
         const text = (h.payload?.text || "") as string;
         const title = (h.payload?.title || "").toString();
         const url = (h.payload?.url || h.payload?.source || "") as string;
 
         return (
-          <article key={h.id} className="rounded border bg-white dark:bg-gray-900 px-4 py-4 shadow-sm">
+          <article
+            key={h.id}
+            className="rounded-3xl bg-white px-6 py-6 shadow-lg ring-1 ring-gray-100 transition hover:-translate-y-1 hover:shadow-xl dark:bg-gray-900"
+          >
             {/* Titre + actions */}
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-semibold leading-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <h3 className="text-lg font-semibold leading-6 text-gray-900 dark:text-gray-100">
                 {title || (text ? text.slice(0, 80) + (text.length > 80 ? "…" : "") : "Résultat")}
               </h3>
               <div className="flex items-center gap-2">
@@ -462,14 +502,14 @@ function ResultsList({ hits, query }: { hits: Hit[]; query: string }) {
                     href={url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sm rounded border px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    className="inline-flex items-center gap-1 rounded-full border border-transparent bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     title="Ouvrir la source"
                   >
                     Ouvrir
                   </a>
                 )}
                 <button
-                  className="text-sm rounded border px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  className="inline-flex items-center gap-1 rounded-full border border-transparent bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                   onClick={() => navigator.clipboard.writeText(text || "")}
                   title="Copier le texte"
                 >
@@ -479,23 +519,23 @@ function ResultsList({ hits, query }: { hits: Hit[]; query: string }) {
             </div>
 
             {/* Extrait */}
-            <p className="mt-1 text-[15px] leading-6 text-gray-800 dark:text-gray-100">
+            <p className="mt-3 text-[15px] leading-7 text-gray-700 dark:text-gray-200">
               {highlight(text, terms)}
             </p>
 
             {/* Métadonnées */}
-            <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               {h.payload?.source && (
-                <span className="inline-flex items-center rounded bg-gray-100 dark:bg-gray-800 px-2 py-0.5">
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-600 dark:bg-blue-500/20 dark:text-blue-100">
                   source: {String(h.payload.source)}
                 </span>
               )}
               {h.payload?.type && (
-                <span className="inline-flex items-center rounded bg-gray-100 dark:bg-gray-800 px-2 py-0.5">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-100">
                   type: {String(h.payload.type)}
                 </span>
               )}
-              <span className="inline-flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
                 score <ScoreBar score={h.score} /> {h.score.toFixed(3)}
               </span>
             </div>
@@ -522,9 +562,9 @@ function highlight(text: string, terms: string[]) {
 function ScoreBar({ score }: { score: number }) {
   const pct = Math.max(0, Math.min(1, score)) * 100;
   return (
-    <span className="inline-block h-2 w-24 rounded bg-gray-200 dark:bg-gray-800 align-middle overflow-hidden">
+    <span className="inline-block h-2 w-24 overflow-hidden rounded-full bg-gray-200 align-middle dark:bg-gray-700">
       <span
-        className="block h-full bg-blue-600"
+        className="block h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"
         style={{ width: `${pct}%` }}
         aria-hidden="true"
       />
@@ -546,10 +586,10 @@ function Bubble({
   return (
     <div className={`mb-3 flex ${role === "user" ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded px-3 py-2 text-[15px] leading-6 ${
+        className={`max-w-[80%] rounded-2xl px-4 py-3 text-[15px] leading-6 shadow ${
           role === "user"
-            ? "bg-blue-600 text-white"
-            : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+            : "bg-white/80 text-gray-900 backdrop-blur dark:bg-gray-800/80 dark:text-gray-100"
         }`}
       >
         {thinking ? (

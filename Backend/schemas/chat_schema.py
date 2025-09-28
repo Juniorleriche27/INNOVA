@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 class ChatMessage(BaseModel):
@@ -21,7 +21,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    citations: List[str] = []
+    citations: List[str] = Field(default_factory=list)
 
 class FeedbackPayload(BaseModel):
     message_id: Optional[int] = None
