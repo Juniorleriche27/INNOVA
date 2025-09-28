@@ -1,28 +1,31 @@
 "use client";
 import { useState } from "react";
-import { sendChat, ChatMessage } from "@/lib/api-client/chat";
+import { sendChat, ChatMessage, ChatSource } from "@/lib/api-client/chat";
+
+type Message = ChatMessage & { sources?: ChatSource[] | undefined };
 
 export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function ask(text: string) {
-    setError(null);
+  async function ask(rawText: string) {
+    const text = rawText.trim();
+    if (!text) return;
 
-    // construire le prochain message utilisateur
-    const next: ChatMessage[] = [...messages, { role: "user", content: text } as ChatMessage];
-    setMessages(next);
+    setError(null);
+    const userMessage: Message = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMessage]);
     setLoading(true);
 
     try {
-      const res = await sendChat({ messages: next });
-
-      // ajouter la réponse assistant
-      setMessages([
-        ...next,
-        { role: "assistant", content: res.answer } as ChatMessage,
-      ]);
+      const res = await sendChat({ question: text });
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: res.answer,
+        sources: res.sources,
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur inconnue");
     } finally {

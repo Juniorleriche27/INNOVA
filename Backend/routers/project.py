@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from schemas.project import Project, ProjectCreate, ProjectUpdate
-from lib.supa import supa_for_jwt, sb_anon
+from lib.supa import supa_for_jwt
 from deps.auth import get_bearer_token
 from postgrest import APIError
 
@@ -41,14 +41,14 @@ def create_project(project: ProjectCreate, token: str | None = Depends(get_beare
 
 @router.get("/", response_model=List[Project], response_model_exclude_none=True)
 def list_projects(token: str | None = Depends(get_bearer_token)):
-    sb = supa_for_jwt(token) if token else sb_anon
+    sb = supa_for_jwt(token)
     res = sb.from_("projects").select(PROJECT_COLUMNS).execute()
     _raise_api_if_error(res)
     return res.data or []
 
 @router.get("/{project_id}", response_model=Project, response_model_exclude_none=True)
 def get_project(project_id: UUID, token: str | None = Depends(get_bearer_token)):
-    sb = supa_for_jwt(token) if token else sb_anon
+    sb = supa_for_jwt(token)
     res = sb.from_("projects").select(PROJECT_COLUMNS).eq("id", str(project_id)).single().execute()
     _raise_api_if_error(res, not_found_msg="Projet introuvable.")
     return res.data
