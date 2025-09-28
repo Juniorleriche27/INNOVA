@@ -16,7 +16,7 @@ function NavLink(props: { href: string; children: React.ReactNode }) {
 
   return (
     <Link
-      href={href as unknown as any}
+      href={href}
       className={`no-underline px-2 py-1 rounded text-[13px] font-medium leading-none outline-none
       ${active ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:text-blue-600"}
       focus-visible:ring-2 focus-visible:ring-blue-500`}
