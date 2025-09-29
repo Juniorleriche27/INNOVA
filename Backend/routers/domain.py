@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from schemas.domain import Domain, DomainCreate, DomainUpdate
-from lib.supa import supa_for_jwt, sb_anon
+from lib.supa import supa_for_jwt, get_sb_anon
 from deps.auth import get_bearer_token
 
 router = APIRouter(tags=["domains"])
@@ -21,13 +21,13 @@ def _raise(res, not_found: Optional[str] = None):
 
 @router.get("/", response_model=List[Domain])
 def read_domains():
-    res = sb_anon.from_("domains").select(COLUMNS).execute()
+    res = get_sb_anon().from_("domains").select(COLUMNS).execute()
     _raise(res)
     return res.data or []
 
 @router.get("/{domain_id}", response_model=Domain)
 def read_domain(domain_id: UUID):
-    res = sb_anon.from_("domains").select(COLUMNS).eq("id", str(domain_id)).single().execute()
+    res = get_sb_anon().from_("domains").select(COLUMNS).eq("id", str(domain_id)).single().execute()
     _raise(res, "Domain not found")
     return res.data
 

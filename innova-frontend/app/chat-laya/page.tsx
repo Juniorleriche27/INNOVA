@@ -25,6 +25,15 @@ type ChatTurn = { role: "user" | "assistant"; text: string; sources?: Hit[] };
 
 /** Petit util */
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const errorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Erreur inconnue";
+  }
+};
 
 /** Page */
 export default function ChatLayaPage() {
@@ -126,8 +135,8 @@ export default function ChatLayaPage() {
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { hits?: Hit[] };
       setHits(data?.hits ?? []);
-    } catch (e: any) {
-      setErr(e?.message || "Erreur inconnue");
+    } catch (error) {
+      setErr(errorMessage(error));
     } finally {
       setLoading(false);
       setElapsed(performance.now() - t0);
@@ -147,16 +156,19 @@ export default function ChatLayaPage() {
       const res = await fetch(`${API}/chatlaya/ask`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, top_k: 8 }),
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as { answer: string; sources?: Hit[] };
+      const data = (await res.json()) as { answer: string; sources?: Hit[]; rag_error?: string };
       const assistant: ChatTurn = { role: "assistant", text: data.answer, sources: data.sources };
+      if (data.rag_error) {
+        assistant.text += `\n\n⚠️ Contexte indisponible: ${data.rag_error}`;
+      }
       setTurns((t) => [...t, assistant]);
-    } catch (e: any) {
+    } catch (error) {
       const assistant: ChatTurn = {
         role: "assistant",
-        text: `❌ Erreur: ${e?.message || "inconnue"}`,
+        text: `❌ Erreur: ${errorMessage(error)}`,
       };
       setTurns((t) => [...t, assistant]);
     } finally {
@@ -179,11 +191,11 @@ export default function ChatLayaPage() {
     try {
       const fd = new FormData();
       Array.from(files).forEach((f) => fd.append("file", f));
-      const res = await fetch(`${API}/ingest`, { method: "POST", body: fd });
+      const res = await fetch(`${API}/chatlaya/ingest`, { method: "POST", body: fd });
       if (!res.ok) throw new Error(await res.text());
       // Optionnel: toast OK
-    } catch (e: any) {
-      setUploadErr(e?.message || "Upload échoué");
+    } catch (error) {
+      setUploadErr(errorMessage(error) || "Upload échoué");
     } finally {
       setUploading(false);
     }
